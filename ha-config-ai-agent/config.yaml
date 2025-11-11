@@ -27,9 +27,9 @@ panel_title: "Config Agent"
 # Volume mappings - CRITICAL for config access
 map:
   - type: homeassistant_config
-    read_only: false
+    read_only: true
   - type: addon_config
-    read_only: false
+    read_only: true
   - type: backup
     read_only: false
 
