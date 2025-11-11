@@ -1,4 +1,4 @@
-This is the repository for the Home Assistant Configuration AI Agent add-on.
+This is the repository for the Home Assistant Golem add-on.
 
 An AI-powered Home Assistant configuration assistant with approval workflow.
 
