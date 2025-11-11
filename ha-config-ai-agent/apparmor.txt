@@ -11,9 +11,9 @@ profile hassio-config-agent flags=(attach_disconnected,mediate_deleted) {
   capability net_admin,
 
   # Allow config directory access
-  /homeassistant/** rw,
-  /config/** rw,
-  /backup/** rw,
+  /homeassistant/** r,
+  /config/** r,
+  /backup/** r,
 
   # S6-Overlay
   /init rix,
