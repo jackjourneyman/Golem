@@ -348,8 +348,8 @@ class AgentTools:
                 matched_paths = list(config_dir.glob(glob_pattern))
                 logger.info(f"File path pattern matched {len(matched_paths)} files")
             else:
-                # Find all YAML files
-                matched_paths = list(config_dir.glob("**/*.yaml"))
+                # Find all YAML files and txt files
+                matched_paths = list(config_dir.glob("**/*.yaml")) + list(config_dir.glob("**/*.txt"))
 
             # Filter to only files (not directories) and exclude custom_components
             matched_paths = [
