@@ -2,6 +2,10 @@
 
 All notable changes to the AI Configuration Agent add-on will be documented in this file.
 
+## [0.3.0] - 2026-09-27
+
+Modifies agent_system.py and tools.py to prevent open searches of /config, which result in an "Insufficient tokens" error.
+
 ## [0.2.2] - 2025-11-17
 
 Amended src/agents/tools.py line 350 to allow .txt files to be read.
