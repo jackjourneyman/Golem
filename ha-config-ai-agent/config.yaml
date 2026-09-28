@@ -1,7 +1,7 @@
-name: "AI Configuration Agent"
+name: "The Golem"
 version: "0.3.0"
 slug: "ai-documentation-agent"
-description: "AI-powered Home Assistant documentation assistant"
+description: "AI-powered Home Assistant documentation agent"
 url: "https://github.com/jackjourneyman/Golem"
 arch:
   - aarch64
@@ -31,7 +31,7 @@ map:
   - type: addon_config
     read_only: true
   - type: backup
-    read_only: false
+    read_only: true
 
 # API access
 homeassistant_api: true
