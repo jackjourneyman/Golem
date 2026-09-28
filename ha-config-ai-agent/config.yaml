@@ -1,0 +1,65 @@
+name: "The Golem"
+version: "0.3.0"
+slug: "ai-documentation-agent"
+description: "AI-powered Home Assistant documentation agent"
+url: "https://github.com/jackjourneyman/Golem"
+arch:
+  - aarch64
+  - i386
+  - amd64
+  - armhf
+  - armv7
+
+# Startup configuration
+init: false
+startup: application
+boot: auto
+watchdog: "tcp://[HOST]:[PORT:8099]"
+
+codenotary: jackjourneyman00@gmail.com
+
+# Ingress configuration (provides security and authentication)
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:robot-outline
+panel_title: "Documentation Agent"
+
+# Volume mappings - CRITICAL for config access
+map:
+  - type: homeassistant_config
+    read_only: true
+  - type: addon_config
+    read_only: true
+  - type: backup
+    read_only: true
+
+# API access
+homeassistant_api: true
+hassio_api: true
+hassio_role: manager
+auth_api: true
+
+# Security
+apparmor: true
+privileged: []
+
+# User-configurable options
+options:
+  openai_api_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  openai_api_key: ""
+  openai_model: "gemini-2.5-flash" # Best model for speed and price
+  log_level: "info"
+  system_prompt_file: ""
+  temperature: ""
+  enable_cache_control: false
+  usage_tracking: "stream_options" # Options: "stream_options", "usage", "disabled"
+
+schema:
+  openai_api_url: url
+  openai_api_key: password?
+  openai_model: str
+  log_level: list(debug|info|warning|error)
+  system_prompt_file: str?
+  temperature: str?
+  enable_cache_control: bool
+  usage_tracking: list(stream_options|usage|disabled)
