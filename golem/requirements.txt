@@ -15,9 +15,8 @@ aiohttp==3.13.1
 websockets==15.0.1
 
 # State management
-redis==7.0.0
 pydantic==2.12.3
 
 # Utilities
 python-multipart==0.0.20
-requests==2.32.5
+

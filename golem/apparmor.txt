@@ -13,7 +13,6 @@ profile hassio-config-agent flags=(attach_disconnected,mediate_deleted) {
   # Allow config directory access
   /homeassistant/** r,
   /config/** r,
-  /backup/** r,
 
   # S6-Overlay
   /init rix,
@@ -41,7 +40,6 @@ profile hassio-config-agent flags=(attach_disconnected,mediate_deleted) {
   /app/src/agents/** rwix,
   /app/src/config/** rwix,
   /app/src/ha/** rwix,
-  /app/src/workflow/** rwix,
   
   # Network access for API calls
   network,

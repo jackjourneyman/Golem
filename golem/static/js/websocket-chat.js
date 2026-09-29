@@ -1,18 +1,44 @@
-// WebSocket-based chat implementation to avoid Ingress buffering
+// Golem - WebSocket-based chat implementation
+//
+// Owns the WebSocket connection to /ws/chat and the event handlers for the
+// agent's streaming protocol (token, tool_call, tool_start, tool_result,
+// message_complete, complete, error). Rendering helpers are defined in
+// app.js and called from here.
+//
+// WebSocket streaming is used instead of SSE because the Home Assistant
+// Ingress proxy buffers SSE responses, which broke progressive output.
+//
+// Changes from the parent project (which could write to /config):
+// - Removed the propose_config_changes branch in the tool_result handler:
+//   with write access removed the backend never emits that tool, so the
+//   changeset assembly, the toolCallArguments store and the addApprovalCard
+//   call were dead code referencing a function that no longer exists.
+// - Removed the toolCallArguments global and its reset per request: it
+//   existed solely to reconstruct propose_config_changes arguments for
+//   the approval modal.
+// - Removed the argument-capture logic in the tool_start handler for the
+//   same reason; tool_start now only displays the execution notice.
+//
+// The send path, connection management and all retained event handlers
+// are unchanged in behaviour.
 
 let ws = null;
 let currentAssistantMessage = null;
 let currentMessageContent = '';
 let loadingIndicator = null;
-let toolCallArguments = {}; // Store arguments from tool_start events, keyed by tool_call_id
+
+// ---------------------------------------------------------------------------
+// Connection management
+// ---------------------------------------------------------------------------
 
 function connectWebSocket() {
+    // Reuse an existing open connection rather than opening a new one.
     if (ws && ws.readyState === WebSocket.OPEN) {
         return ws;
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Use relative path to work with Home Assistant Ingress proxy
+    // Relative path so the URL works behind the Home Assistant Ingress proxy.
     const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/chat`;
 
     console.log('Connecting to WebSocket:', wsUrl);
@@ -35,37 +61,40 @@ function connectWebSocket() {
     return ws;
 }
 
-// Override the sendMessage function to use WebSocket
+// ---------------------------------------------------------------------------
+// Send path
+// ---------------------------------------------------------------------------
+
+// This function replaces the stub sendMessage in app.js at page load (see
+// the override block in index.html).
 async function sendMessageWebSocket() {
     const message = messageInput.value.trim();
     if (!message) return;
 
     console.log('Sending message via WebSocket:', message);
 
-    // Add user message to chat
+    // Render the user message and add it to the conversation history.
     addUserMessage(message);
-
-    // Add user message to conversation history
     conversationHistory.push({
         role: 'user',
         content: message
     });
 
-    // Clear input
+    // Clear the input.
     messageInput.value = '';
     messageInput.style.height = 'auto';
 
-    // Disable send button and show loading indicator
+    // Disable the send button while the response streams; show the
+    // "thinking" indicator until the first token arrives.
     sendBtn.disabled = true;
     currentAssistantMessage = null;
     currentMessageContent = '';
     loadingIndicator = addLoadingIndicator();
-    toolCallArguments = {}; // Reset tool arguments for new conversation
 
     try {
         const ws = connectWebSocket();
 
-        // Wait for connection
+        // Wait for the connection if it is still opening, with a timeout.
         if (ws.readyState !== WebSocket.OPEN) {
             await new Promise((resolve, reject) => {
                 ws.onopen = resolve;
@@ -74,13 +103,14 @@ async function sendMessageWebSocket() {
             });
         }
 
-        // Set up message handler for this request
+        // Install the handler for this session; every server event is a
+        // single JSON frame dispatched to handleWebSocketMessage.
         ws.onmessage = (event) => {
             const message = JSON.parse(event.data);
             handleWebSocketMessage(message);
         };
 
-        // Send the chat request
+        // Send the chat request; history excludes the message just added.
         ws.send(JSON.stringify({
             type: 'chat',
             message: message,
@@ -96,6 +126,12 @@ async function sendMessageWebSocket() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Event handling
+// ---------------------------------------------------------------------------
+
+// Dispatch one server event. Every branch cleans up the loading indicator
+// and send button state as appropriate, so the UI never sticks mid-stream.
 function handleWebSocketMessage(message) {
     const eventType = message.event;
     const data = message.data;
@@ -104,33 +140,33 @@ function handleWebSocketMessage(message) {
 
     try {
         if (eventType === 'token') {
-            // Remove loading indicator on first token
+            // First token: remove the thinking indicator and create the
+            // streaming message element.
             if (loadingIndicator && loadingIndicator.parentNode) {
                 removeLoadingIndicator(loadingIndicator);
                 loadingIndicator = null;
             }
 
-            // Accumulate content
+            // Accumulate content and update the streaming element.
             currentMessageContent += data.content;
 
-            // Update or create assistant message element
             if (!currentAssistantMessage) {
                 currentAssistantMessage = addAssistantMessageStreaming('');
             }
             updateAssistantMessageStreaming(currentAssistantMessage, currentMessageContent);
 
         } else if (eventType === 'message_complete') {
-            // Add message to conversation history
+            // Add the final assistant message to the history.
             conversationHistory.push(data.message);
 
-            // Finalize the assistant message display
+            // Apply markdown rendering to the completed message.
             if (currentAssistantMessage) {
                 finalizeAssistantMessageStreaming(currentAssistantMessage);
             }
             currentMessageContent = '';
             currentAssistantMessage = null;
 
-            // Update token counter if usage data is available
+            // Update the cumulative token counter if usage was reported.
             if (data.usage) {
                 updateTokenCounter(
                     data.usage.input_tokens || 0,
@@ -140,13 +176,14 @@ function handleWebSocketMessage(message) {
             }
 
         } else if (eventType === 'tool_call') {
-            // Finalize current message if any
+            // The model requested tools: finalise any partial message,
+            // record the assistant turn in the history, then show a
+            // summary card and re-show the indicator while the tools run.
             if (currentAssistantMessage) {
                 finalizeAssistantMessageStreaming(currentAssistantMessage);
                 currentAssistantMessage = null;
             }
 
-            // Add assistant message with tool calls to history
             conversationHistory.push({
                 role: 'assistant',
                 content: currentMessageContent,
@@ -154,87 +191,35 @@ function handleWebSocketMessage(message) {
             });
             currentMessageContent = '';
 
-            // Show tool execution indicator summary
-            addSystemMessage(`🔧 Calling ${data.tool_calls.length} tool(s): ${data.tool_calls.map(tc => tc.function.name).join(', ')}`);
+            addToolCallMessage(data.tool_calls);
 
-            // Re-add loading indicator while tools execute and AI processes next response
             if (!loadingIndicator) {
                 loadingIndicator = addLoadingIndicator();
             }
 
         } else if (eventType === 'tool_start') {
-            // Store the arguments for later use when we get the tool_result
-            if (data.tool_call_id && data.arguments) {
-                toolCallArguments[data.tool_call_id] = data.arguments;
-                console.log(`Stored arguments for tool_call_id ${data.tool_call_id}:`, data.arguments);
-            }
-
-            // Show individual tool execution start
+            // Individual tool execution notice; both remaining tools are
+            // read-only, so this is purely informational.
             addSystemMessage(`▶️ Executing: ${data.function}...`);
 
         } else if (eventType === 'tool_result') {
             console.log('Tool result received:', data.function, 'success:', data.result?.success);
 
-            // Add tool result to history
+            // Record the result in the history exactly as the backend
+            // produced it, preserving the round-trip for later turns.
             conversationHistory.push({
                 role: 'tool',
                 tool_call_id: data.tool_call_id,
                 content: JSON.stringify(data.result)
             });
 
-            // Display tool result visually
+            // Render the collapsible result card.
             addToolResultMessage(data.function, data.result);
-
-            // Process tool results (especially for propose_config_changes)
-            if (data.function === 'propose_config_changes' && data.result.success) {
-                console.log('propose_config_changes success, creating approval card');
-                console.log('Result:', data.result);
-
-                // Extract changeset info and display approval card
-                const changesetData = {
-                    changeset_id: data.result.changeset_id,
-                    total_files: data.result.total_files,
-                    files: data.result.files,
-                    reason: data.result.reason
-                };
-
-                // Get the arguments from the stored tool_start data
-                const args = toolCallArguments[data.tool_call_id];
-                console.log('Retrieved arguments from tool_start event:', args);
-
-                if (args && args.changes) {
-                    changesetData.file_changes_detail = args.changes;
-                    changesetData.original_contents = extractOriginalContents(conversationHistory, args.changes);
-                    console.log('Successfully extracted file_changes_detail and original_contents');
-                } else {
-                    console.error('No arguments found for tool_call_id:', data.tool_call_id);
-                    console.log('Available tool call IDs:', Object.keys(toolCallArguments));
-                }
-
-                console.log('Final changeset data before addApprovalCard:', changesetData);
-                console.log('Has file_changes_detail?', !!changesetData.file_changes_detail);
-                console.log('Has original_contents?', !!changesetData.original_contents);
-
-                // Ensure we have the required data for diffs
-                if (!changesetData.file_changes_detail) {
-                    console.error('ERROR: Missing file_changes_detail in changesetData!');
-                    console.log('Attempting to recover from tool result...');
-
-                    // The backend should have sent the changes in the result
-                    // but we need them from the tool call arguments for the new_content
-                    // Let's try to recover from what we have
-                    if (data.result.files && Array.isArray(data.result.files)) {
-                        console.warn('Only have file list, not full changes. Approval card will show limited info.');
-                    }
-                }
-
-                addApprovalCard(changesetData);
-            }
 
         } else if (eventType === 'complete') {
             console.log('Stream complete:', data);
 
-            // Update token counter with final totals
+            // Final cumulative usage update.
             if (data.usage) {
                 updateTokenCounter(
                     data.usage.input_tokens || 0,
@@ -243,7 +228,7 @@ function handleWebSocketMessage(message) {
                 );
             }
 
-            // Final cleanup
+            // Final cleanup: restore the send button.
             if (loadingIndicator && loadingIndicator.parentNode) {
                 removeLoadingIndicator(loadingIndicator);
                 loadingIndicator = null;
@@ -252,9 +237,9 @@ function handleWebSocketMessage(message) {
             messageInput.focus();
 
         } else if (eventType === 'error') {
+            // Surface the error and restore the input state.
             addSystemMessage(`❌ Error: ${data.error}`);
 
-            // Cleanup
             if (loadingIndicator && loadingIndicator.parentNode) {
                 removeLoadingIndicator(loadingIndicator);
                 loadingIndicator = null;
@@ -268,5 +253,5 @@ function handleWebSocketMessage(message) {
     }
 }
 
-// Export for use in main app
+// Export for the override in index.html.
 window.sendMessageWebSocket = sendMessageWebSocket;

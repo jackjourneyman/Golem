@@ -30,8 +30,6 @@ map:
     read_only: true
   - type: addon_config
     read_only: true
-  - type: backup
-    read_only: true
 
 # API access
 homeassistant_api: true

@@ -5,6 +5,16 @@ All notable changes to the AI Configuration Agent add-on will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-29
+
+`src/config/manager.py`, `src/agents/tools.py`, `src/agents/agent_system.py`, `src/main.py` and `src/config/__init__.py` - rewritten as read-only 
+
+`static/js/app.js`, `static/js/websocket-chat.js`, `templates/index.html` - front-end cleanup and rejection-notice rendering
+
+`README.md` and `DOCS.md` — documentation rewrites
+
+Reads for curated documents capped at 60,000 characters to prevent truncation (other reads of /config capped at 8,000)
+
 ## [0.3.0] - 2026-09-27
 
 Modifies agent_system.py and tools.py to prevent open searches of /config, which result in an "Insufficient tokens" error.

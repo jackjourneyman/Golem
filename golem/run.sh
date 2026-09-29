@@ -16,13 +16,9 @@ export USAGE_TRACKING=$(bashio::config 'usage_tracking' ${USAGE_TRACKING:-stream
 # Home Assistant configuration
 export HA_CONFIG_DIR="/homeassistant"
 export ADDON_CONFIG_DIR="/config"
-export BACKUP_DIR="/backup/config-agent"
-
-# Create backup directory
-mkdir -p "${BACKUP_DIR}"
 
 # Log startup
-bashio::log.info "Starting AI Configuration Agent..."
+bashio::log.info "Starting Golem..."
 bashio::log.info "OpenAI API: ${OPENAI_API_URL}"
 bashio::log.info "Model: ${OPENAI_MODEL}"
 bashio::log.info "HA Config: ${HA_CONFIG_DIR}"

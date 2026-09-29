@@ -1,50 +1,56 @@
 <!DOCTYPE html>
+<!--
+  Golem - Chat Interface Template
+
+  Changes from the parent project (which could write to /config):
+  - Removed the diff viewer modal (#diffModal): with write access removed
+    the agent never proposes changes, so there is nothing to diff or
+    approve. This removes the modal markup, the approve/reject/cancel
+    buttons and their onclick handlers (closeDiffModal,
+    approvePendingChanges, rejectPendingChanges).
+  - Removed the diff2html and diff CDN includes: they were loaded solely
+    to render approval diffs.
+  - Version badge updated to 0.4.0 to match the add-on version.
+
+  Retained unchanged:
+  - The chat container, input area and token counter (same element ids
+    used by app.js and websocket-chat.js).
+  - The marked.js CDN include (markdown rendering of assistant replies).
+  - The script load order and the WebSocket override of sendMessage,
+    which avoids the Home Assistant Ingress SSE buffering problem.
+-->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Documentation Agent</title>
+    <title>Golem</title>
     <link rel="stylesheet" href="static/css/styles.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.47/bundles/css/diff2html.min.css">
+    <!-- marked.js: markdown rendering for assistant messages -->
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/diff@5.1.0/dist/diff.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.47/bundles/js/diff2html-ui.min.js"></script>
 </head>
 <body>
     <div class="container">
+        <!-- Header: title, import/export buttons, version badge -->
         <header>
             <h1><img src="static/images/icon.png" width="64" height="64"/> The Golem</h1>
             <div class="header-actions">
+                <!-- Import a previously exported conversation (JSON) -->
                 <button id="importBtn" class="btn btn-icon" title="Import Conversation">📥</button>
+                <!-- Export the current conversation as a JSON file -->
                 <button id="exportBtn" class="btn btn-icon" title="Export Conversation">📤</button>
-                <span class="version-badge"> 0.3.0 </span>
+                <span class="version-badge"> 0.4.0 </span>
             </div>
+            <!-- Hidden file input driven by the import button -->
             <input type="file" id="importFileInput" accept=".json" style="display: none;">
         </header>
 
         <main>
             <!-- Chat Interface -->
             <div class="chat-container">
+                <!-- Message stream: user, assistant, system and tool cards
+                     are appended here dynamically by app.js -->
                 <div id="chatMessages" class="chat-messages">
                     <!-- Messages will be added here dynamically -->
-                </div>
-
-                <!-- Diff Viewer Modal -->
-                <div id="diffModal" class="modal" style="display: none;">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h3>📝 Proposed Changes</h3>
-                            <button class="modal-close" onclick="closeDiffModal()">&times;</button>
-                        </div>
-                        <div class="modal-body" id="diffContent">
-                            <!-- Diff content will be inserted here -->
-                        </div>
-                        <div class="modal-footer">
-                            <button class="btn btn-success" onclick="approvePendingChanges()">✓ Approve & Apply</button>
-                            <button class="btn btn-danger" onclick="rejectPendingChanges()">✗ Reject</button>
-                            <button class="btn btn-secondary" onclick="closeDiffModal()">Cancel</button>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- Input Area -->
@@ -61,8 +67,10 @@
             </div>
         </main>
 
+        <!-- Footer: branding and the cumulative token usage counter,
+             populated by updateTokenCounter() in app.js -->
         <footer>
-            <p>AI Documentation Agent for Home Assistant</p>
+            <p>Golem - read-only documentation agent for Home Assistant</p>
             <div id="tokenCounter" class="footer-token-stats" style="display: none;">
                 <span class="token-counter-icon">📊</span>
                 <span class="token-counter-breakdown">
@@ -74,11 +82,15 @@
         </footer>
     </div>
 
+    <!-- WebSocket chat module: must load first, as app.js depends on the
+         override contract, and app.js defines the rendering helpers the
+         WebSocket module calls. -->
     <script src="static/js/websocket-chat.js"></script>
     <script src="static/js/app.js"></script>
     <script>
-        // Use WebSocket instead of SSE to avoid Ingress buffering
-        // Override the sendMessage function
+        // Use WebSocket instead of SSE to avoid Ingress buffering.
+        // Replace the stub sendMessage in app.js with the WebSocket
+        // implementation exported by websocket-chat.js.
         if (typeof sendMessageWebSocket !== 'undefined') {
             console.log('Using WebSocket mode for real-time streaming');
             const originalSendMessage = sendMessage;
