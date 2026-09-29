@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 `README.md` and `DOCS.md` — documentation rewrites
 
-Reads for curated documents capped at 60,000 characters to prevent truncation (other reads of /config capped at 8,000)
+Reads for curated documents capped at 60,000 characters to prevent truncation (searches of /config capped at 8,000)
 
 ## [0.3.0] - 2026-09-27
 
