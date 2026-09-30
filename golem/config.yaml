@@ -1,5 +1,5 @@
 name: "The Golem"
-version: "0.4.0"
+version: "0.4.1"
 slug: "ai-documentation-agent"
 description: "AI-powered Home Assistant documentation agent"
 url: "https://github.com/jackjourneyman/Golem"
