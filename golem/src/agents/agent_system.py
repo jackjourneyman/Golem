@@ -21,6 +21,19 @@ Changes from the parent project (which could write to /config):
 - AgentTools is constructed with the config manager only (the
   agent_system back-reference existed solely to store changesets).
 
+New in this version (tool description fix):
+- The read_config_file tool description previously cited the example path
+  'ai_data/golem_docs_index.txt'. Because tool descriptions are part of
+  the prompt the model sees, it treated that file as a known convention
+  and probed it at the start of conversations, producing a spurious
+  "File not found" error on installations without a curated ai_data
+  directory. The example has been generalised: it no longer asserts that
+  any particular curated file exists, and instead directs the model to
+  ask the user when it is unsure which documentation files are present.
+  Installations that DO keep curated files should name them through a
+  custom system prompt (see DOCS.md), which remains the supported way to
+  teach Golem about an ai_data index.
+
 The chat_stream event protocol is unchanged: token, tool_call,
 tool_start, tool_result, message_complete, complete, error.
 """
@@ -230,6 +243,15 @@ Remember: You are assisting with a production Home Assistant system. Accuracy an
             # carries the narrow-pattern contract enforced server-side
             # in tools.py; keeping the descriptions in sync prevents the
             # model from making rejected calls.
+            #
+            # NOTE (tool description fix): the read_config_file examples
+            # deliberately avoid naming any curated file (such as an
+            # ai_data index). Tool descriptions are part of the prompt;
+            # a named example would cause the model to assume the file
+            # exists and probe it on installations where it does not,
+            # producing a spurious "File not found" error. Curated
+            # files, where present, should be introduced through a
+            # custom system prompt instead.
             tools = [
                 {
                     "type": "function",
@@ -268,12 +290,13 @@ Remember: You are assisting with a production Home Assistant system. Accuracy an
                         "name": "read_config_file",
                         "description": (
                             "Read ONE configuration file by relative path (e.g. "
-                            "'automations.yaml', 'scripts.yaml', 'ai_data/golem_docs_index.txt'). "
-                            "Prefer this over search_config_files whenever the file is already "
-                            "known. Content is capped; the 'truncated' flag shows if the file "
-                            "was longer. 'lovelace.yaml' and registry entries "
-                            "(devices/<id>.json, entities/<id>.json, areas/<id>.json) are also "
-                            "accepted."
+                            "'automations.yaml', 'scripts.yaml'). Prefer this over "
+                            "search_config_files whenever the file is already known. If the "
+                            "user refers to curated documentation or notes files, ask them for "
+                            "the exact path rather than guessing one. Content is capped; the "
+                            "'truncated' flag shows if the file was longer. 'lovelace.yaml' and "
+                            "registry entries (devices/<id>.json, entities/<id>.json, "
+                            "areas/<id>.json) are also accepted."
                         ),
                         "parameters": {
                             "type": "object",

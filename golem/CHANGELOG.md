@@ -5,6 +5,12 @@ All notable changes to the AI Configuration Agent add-on will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-03
+
+`src/agents/agent_system.py` changed to prevent searches for `/ai_data/index.txt` when it does not exist
+
+`screenshot.png` and link to GitHub discussion page added to README.md
+
 ## [0.5.0] - 2026-10-03
 
 `static/js/app.js`, `static/js/websocket-chat.js`, `templates/index.html`
