@@ -37,7 +37,7 @@ import json as json_lib
 from .config import ConfigurationManager
 from .agents import AgentSystem
 
-version = "0.5.1"
+version = "0.5.3"
 
 # ---------------------------------------------------------------------------
 # Logging configuration
