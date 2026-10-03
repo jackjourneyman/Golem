@@ -10,7 +10,17 @@
     approvePendingChanges, rejectPendingChanges).
   - Removed the diff2html and diff CDN includes: they were loaded solely
     to render approval diffs.
-  - Version badge updated to 0.4.1 to match the add-on version.
+  - Version badge updated to 0.5.0 to match the add-on version.
+
+  New in this version (session continuity):
+  - Added the "New chat" button (#newChatBtn) in the header, next to the
+    import and export buttons. Its click handler (startNewChat, defined
+    in app.js) clears the in-memory conversation, the localStorage copy
+    and the token counters, and starts a fresh conversation. The
+    conversation itself is persisted to localStorage by app.js after
+    every completed exchange, so navigating away from the panel and back
+    no longer loses the chat; the button is the escape hatch that ends
+    it deliberately.
 
   Retained unchanged:
   - The chat container, input area and token counter (same element ids
@@ -34,13 +44,19 @@
         <header>
             <h1><img src="static/images/icon.png" width="64" height="64"/> The Golem</h1>
             <div class="header-actions">
+                <!-- Start a fresh conversation: clears the current chat and
+                     the persisted copy in localStorage (see startNewChat
+                     in app.js). Reuses the .btn-icon styling of its
+                     neighbours, so no styles.css change is needed. -->
+                <button id="newChatBtn" class="btn btn-icon" title="New Chat">🗑️</button>
                 <!-- Import a previously exported conversation (JSON) -->
                 <button id="importBtn" class="btn btn-icon" title="Import Conversation">📥</button>
                 <!-- Export the current conversation as a JSON file -->
                 <button id="exportBtn" class="btn btn-icon" title="Export Conversation">📤</button>
-                <span class="version-badge"> 0.4.1 </span>
+                <span class="version-badge"> 0.5.0 </span>
             </div>
-            <!-- Hidden file input driven by the import button -->
+ 
+           <!-- Hidden file input driven by the import button -->
             <input type="file" id="importFileInput" accept=".json" style="display: none;">
         </header>
 

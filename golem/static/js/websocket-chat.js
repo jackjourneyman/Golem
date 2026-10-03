@@ -19,8 +19,19 @@
 // - Removed the argument-capture logic in the tool_start handler for the
 //   same reason; tool_start now only displays the execution notice.
 //
+// New in this version (session continuity):
+// - The 'complete' handler now calls saveConversationToStorage() (defined
+//   in app.js), writing the conversation history and cumulative token
+//   counts to localStorage. This is the one point in the streaming
+//   protocol at which the history is known to be complete and
+//   consistent: every tool call and result for the exchange has been
+//   appended, the final usage figures have been accumulated, and no
+//   further events for this request will arrive. Persisting here means
+//   the user can navigate away from the Golem panel at any time between
+//   messages and find the conversation intact on return.
+//
 // The send path, connection management and all retained event handlers
-// are unchanged in behaviour.
+// are otherwise unchanged in behaviour.
 
 let ws = null;
 let currentAssistantMessage = null;
@@ -160,6 +171,7 @@ function handleWebSocketMessage(message) {
             conversationHistory.push(data.message);
 
             // Apply markdown rendering to the completed message.
+
             if (currentAssistantMessage) {
                 finalizeAssistantMessageStreaming(currentAssistantMessage);
             }
@@ -227,6 +239,13 @@ function handleWebSocketMessage(message) {
                     data.usage.cached_tokens || 0
                 );
             }
+
+            // Persist the conversation now that the exchange is fully
+            // complete. Defined in app.js; see the comments there for the
+            // storage strategy and quota fallback. This single call is
+            // what makes the chat survive navigating away from the
+            // Golem panel and returning later.
+            saveConversationToStorage();
 
             // Final cleanup: restore the send button.
             if (loadingIndicator && loadingIndicator.parentNode) {

@@ -1,5 +1,5 @@
 name: "The Golem"
-version: "0.4.1"
+version: "0.5.0"
 slug: "ai-documentation-agent"
 description: "AI-powered Home Assistant documentation agent"
 url: "https://github.com/jackjourneyman/Golem"
@@ -22,7 +22,7 @@ codenotary: jackjourneyman00@gmail.com
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:robot-outline
-panel_title: "Documentation Agent"
+panel_title: "The Golem"
 
 # Volume mappings - CRITICAL for config access
 map:

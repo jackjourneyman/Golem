@@ -7,6 +7,8 @@
 // - Rendering helpers: user, assistant, system, tool-call and
 //   tool-result messages, loading indicator, token counter
 // - Conversation export and import
+// - Conversation persistence across page loads (localStorage) and the
+//   "New chat" button
 //
 // Changes from the parent project (which could write to /config):
 // - Removed the entire approval UI: addApprovalCard, viewChanges,
@@ -24,6 +26,20 @@
 //   preserved.
 // - Removed all references to the diffModal / diffContent DOM elements
 //   and to the propose_config_changes tool.
+//
+// New in this version (session continuity):
+// - The conversation history and cumulative token counts are persisted
+//   to localStorage under STORAGE_KEY after every completed exchange.
+//   When the page is reloaded (for example when the user navigates to
+//   another Home Assistant dashboard and then returns to the Golem
+//   panel), the history is restored and re-rendered, so the chat
+//   continues where it left off. The backend needs no change: it is
+//   stateless, and the client replays the full history with each
+//   message (see the 'conversation_history' field in the WebSocket
+//   chat protocol).
+// - A "New chat" button (see index.html) clears the in-memory history,
+//   the persisted copy and the token counters, and starts a fresh
+//   conversation.
 //
 // Message sending itself lives in websocket-chat.js, which overrides
 // sendMessage() at page load to use the /ws/chat WebSocket (avoiding
@@ -46,11 +62,163 @@ let cumulativeOutputTokens = 0;
 let cumulativeCachedTokens = 0;
 
 // ---------------------------------------------------------------------------
+// Conversation persistence (localStorage)
+// ---------------------------------------------------------------------------
+// The server holds no conversation state: every message the user sends is
+// accompanied by the full history, and the updated history is returned in
+// the 'complete' event. Conversation continuity across page loads is
+// therefore purely a client-side concern, solved by writing the history
+// to localStorage after each completed exchange and reading it back on
+// page load.
+//
+// localStorage is used (rather than sessionStorage) so the conversation
+// also survives closing the browser tab, matching the behaviour of
+// mainstream AI chat interfaces. Browsers commonly allow around 5 MB per
+// origin, which is ample for text; however tool results can be large
+// (the backend caps a single read at 60,000 characters), so a quota-
+// tolerant write path is provided below.
+
+// Key under which the conversation is persisted in localStorage.
+const STORAGE_KEY = 'golem-conversation';
+
+// Maximum number of messages kept in the persisted conversation. This is a
+// soft defence against unbounded growth over a long-lived conversation;
+// the model itself has a finite context, so very old turns lose value.
+const MAX_PERSISTED_MESSAGES = 200;
+
+// Write the current conversation and token counters to localStorage.
+// Called by websocket-chat.js when the 'complete' event arrives (the
+// point at which the history is fully consistent), and by this module
+// after an import or before starting a new chat.
+function saveConversationToStorage() {
+    try {
+        const payload = {
+            saved_at: new Date().toISOString(),
+            input_tokens: cumulativeInputTokens,
+            output_tokens: cumulativeOutputTokens,
+            cached_tokens: cumulativeCachedTokens,
+            conversation: conversationHistory
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (err) {
+        // The most likely failure is exceeding the storage quota, caused
+        // by large tool-result contents. Fall back to a trimmed copy in
+        // which tool result contents are shortened. The trimmed copy is
+        // only used for persistence; the in-memory history, which is
+        // what gets sent to the backend during the live session, is
+        // never modified.
+        console.warn('Persisting full conversation failed, retrying trimmed:', err);
+        try {
+            const trimmed = conversationHistory.slice(-MAX_PERSISTED_MESSAGES).map(msg => {
+                if (msg.role === 'tool' && typeof msg.content === 'string'
+                    && msg.content.length > 4000) {
+                    return {
+                        ...msg,
+                        content: msg.content.slice(0, 4000)
+                            + ' … [tool result shortened for local persistence]'
+                    };
+                }
+                return msg;
+            });
+            const payload = {
+                saved_at: new Date().toISOString(),
+                input_tokens: cumulativeInputTokens,
+                output_tokens: cumulativeOutputTokens,
+                cached_tokens: cumulativeCachedTokens,
+                conversation: trimmed
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        } catch (err2) {
+            // Give up silently: persistence is a convenience, never a
+            // correctness requirement. The live chat is unaffected.
+            console.warn('Could not persist conversation:', err2);
+        }
+    }
+}
+
+// Read a previously persisted conversation, if any, and restore it into
+// the in-memory state and the DOM. Returns true when a conversation was
+// restored, false when there was nothing valid to restore.
+function restoreConversationFromStorage() {
+    let payload;
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return false;
+        payload = JSON.parse(raw);
+    } catch (err) {
+        // Corrupt or unreadable persisted state is discarded rather than
+        // allowed to break the page.
+        console.warn('Discarding unreadable persisted conversation:', err);
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+        return false;
+    }
+
+    const messages = payload.conversation;
+    if (!Array.isArray(messages) || messages.length === 0) return false;
+
+    // Rebuild the in-memory history and re-render each entry, exactly as
+    // the import feature does. Tool entries are kept in the history sent
+    // to the backend but are not re-rendered as chat bubbles.
+    for (const msg of messages) {
+        conversationHistory.push(msg);
+        if (msg.role === 'user') {
+            addUserMessage(msg.content);
+        } else if (msg.role === 'assistant' && msg.content) {
+            addAssistantMessage(msg.content);
+        }
+    }
+
+    // Restore the cumulative token counters from the persisted values so
+    // the footer total continues from where the previous session ended.
+    if (typeof payload.input_tokens === 'number'
+        && (payload.input_tokens > 0 || payload.output_tokens > 0)) {
+        cumulativeInputTokens = payload.input_tokens;
+        cumulativeOutputTokens = payload.output_tokens;
+        cumulativeCachedTokens = payload.cached_tokens || 0;
+
+        tokenCounterInput.textContent = `↓${cumulativeInputTokens.toLocaleString()}`;
+        tokenCounterOutput.textContent = `↑${cumulativeOutputTokens.toLocaleString()}`;
+        if (cumulativeCachedTokens > 0) {
+            tokenCounterCached.textContent = `💾${cumulativeCachedTokens.toLocaleString()}`;
+            tokenCounterCached.style.display = 'inline';
+        }
+        tokenCounter.style.display = 'flex';
+    }
+
+    addSystemMessage(`📥 Conversation restored (${messages.length} message(s)).`);
+    return true;
+}
+
+// Start a new conversation: clear the in-memory history, the persisted
+// copy and the token counters, then confirm the reset in the chat.
+// Bound to the "New chat" button in index.html.
+function startNewChat() {
+    // Nothing to do if the conversation is already empty.
+    if (conversationHistory.length === 0 && chatMessages.children.length === 0) {
+        return;
+    }
+
+    // Clear the visible chat and the in-memory history.
+    conversationHistory = [];
+    chatMessages.innerHTML = '';
+    resetTokenCounter();
+
+    // Remove the persisted copy so the next page load starts fresh too.
+    try { localStorage.removeItem(STORAGE_KEY); } catch (err) {
+        console.warn('Could not clear persisted conversation:', err);
+    }
+
+    addSystemMessage('🗑️ New conversation started.');
+    scrollToBottom();
+}
+
+// ---------------------------------------------------------------------------
 // DOM elements
 // ---------------------------------------------------------------------------
 // Resolved once at page load and shared with websocket-chat.js, which relies
 // on the same globals (messageInput, sendBtn, chatMessages...).
 let chatMessages, messageInput, sendBtn, exportBtn, importBtn, importFileInput;
+let newChatBtn;
 let tokenCounter, tokenCounterInput, tokenCounterOutput, tokenCounterCached;
 
 // ---------------------------------------------------------------------------
@@ -66,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     exportBtn = document.getElementById('exportBtn');
     importBtn = document.getElementById('importBtn');
     importFileInput = document.getElementById('importFileInput');
+    newChatBtn = document.getElementById('newChatBtn');
     tokenCounter = document.getElementById('tokenCounter');
     tokenCounterInput = document.getElementById('tokenCounterInput');
     tokenCounterOutput = document.getElementById('tokenCounterOutput');
@@ -84,6 +253,16 @@ document.addEventListener('DOMContentLoaded', () => {
     exportBtn.addEventListener('click', exportConversation);
     importBtn.addEventListener('click', () => importFileInput.click());
     importFileInput.addEventListener('change', importConversation);
+
+    // New chat: clears state and storage, ready for a fresh conversation.
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', startNewChat);
+    }
+
+    // Restore any persisted conversation BEFORE the health check, so the
+    // restored messages appear first and the readiness banner lands
+    // underneath them.
+    restoreConversationFromStorage();
 
     // Report backend readiness (API key configured, agent initialised).
     checkHealth();
@@ -383,7 +562,7 @@ function updateTokenCounter(inputTokens, outputTokens, cachedTokens = 0) {
     }, 300);
 }
 
-// Reset the counter (used on import of a fresh conversation).
+// Reset the counter (used on import of a fresh conversation or a new chat).
 function resetTokenCounter() {
     cumulativeInputTokens = 0;
     cumulativeOutputTokens = 0;
@@ -445,6 +624,12 @@ function importConversation(event) {
             }
 
             addSystemMessage(`📥 Imported conversation (${messages.length} message(s)).`);
+
+            // The imported conversation replaces whatever was persisted,
+            // so that a reload continues the imported conversation rather
+            // than the previous one.
+            saveConversationToStorage();
+
         } catch (err) {
             console.error('Import failed:', err);
             addSystemMessage('❌ Failed to import conversation: invalid file.');
