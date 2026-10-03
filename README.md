@@ -1,4 +1,4 @@
-This is the repository for the Home Assistant Golem add-on.
+This is the repository for The Golem, an app (add-on) which creates documentation on your Home Assistant instance by scanning its configuration.
 
 # Installation
 
