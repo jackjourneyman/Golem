@@ -1,9 +1,16 @@
 # Changelog
 
-All notable changes to the AI Configuration Agent add-on will be documented in this file.
+All notable changes to The Golem add-on will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.6.0] - 2026-10-11
+
+`src/agents/tools.py`, `src/agents/agent_system.py`
+
+Large files can now be read whole or in sequential passes. `read_config_file` accepts `full_read` (one-pass read of an explicitly named file, bounded by a 400,000-character ceiling) and `offset/length` (chunked reads with `total_chars`, `has_more` and `next_offset` returned for continuation). Truncated default reads now report total_chars and a note directing the model how to obtain the remainder. Tool schema and default system prompt updated accordingly. Default capped behaviour is unchanged.
+
 
 ## [0.5.3] - 2026-10-03
 
@@ -52,6 +59,8 @@ Read only changed to true in config,yaml
 Write permissions removed in apparmor.txt
 
 ____________________________________________
+
+Changes to the AI Configuration Agent add-on before fork.
 
 ## [0.1.0] - 2025-10-26
 

@@ -23,6 +23,12 @@ Two tools remain, both read-only:
 
 Both tools bound their responses: per-file content is capped and the number
 of files per search is capped, protecting the model context window.
+
+Whole-file reads: read_config_file accepts full_read=True (one-pass read of
+an explicitly named file, bounded by MAX_FULL_READ_CHARS) and offset/length
+(sequential chunked reads for files too large for one pass). The caps still
+apply by default; the bypass must be requested explicitly, so the context
+window remains protected.
 """
 
 import json
@@ -55,6 +61,27 @@ logger = logging.getLogger(__name__)
 MAX_READ_CHARS = 60000        # per-file cap for direct reads (read_config_file)
 MAX_CONTENT_CHARS = 8000       # per-file cap within search results
 MAX_FILES_PER_SEARCH = 20      # max number of files returned per search
+
+# --- Explicitly requested whole-file reads (multi-pass support) -----------
+#
+# When the user's instruction names a file explicitly and asks a question
+# that requires the WHOLE file (for example 'read automations.yaml and tell
+# me which automations lack a description'), the model can request a full
+# single-pass read via read_config_file(full_read=True), or page through
+# the file in chunks with offset/length. Two bounds apply:
+#
+# MAX_FULL_READ_CHARS is the hard ceiling for one-pass reads. It exists so
+# that a full_read request can never reintroduce the 'token limit exceeded'
+# failures the caps were created to prevent. Files larger than this cannot
+# be read in one pass and must be paged with offset/length; the tool says
+# so rather than overflowing the context.
+#
+# DEFAULT_CHUNK_CHARS is the chunk size suggested to the model when a file
+# is too large for one pass. It matches MAX_READ_CHARS so each chunked
+# pass is the same size as an ordinary bounded read.
+
+MAX_FULL_READ_CHARS = 400000   # hard ceiling for one-pass full reads
+DEFAULT_CHUNK_CHARS = 60000    # suggested chunk size for paged reads
 
 # Patterns that would match a large share of the configuration and risk
 # overflowing the model context. Rejected outright (case-insensitive).
@@ -232,17 +259,28 @@ class AgentTools:
 
     async def read_config_file(
         self,
-        file_path: str
+        file_path: str,
+        full_read: bool = False,
+        offset: Optional[int] = None,
+        length: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Read a single configuration file by relative path.
 
         Use this in preference to search when the target file is already
         known (for example when the user names it, or when following a
-        reference found by a previous search). Content is capped at
-        MAX_READ_CHARS (the generous single-file cap) and a 'truncated'
-        flag is set if the file was longer. A file truncated in a search
-        result can be re-read in full here up to MAX_READ_CHARS.
+        reference found by a previous search).
+
+        Modes:
+        - Default: content is capped at MAX_READ_CHARS and a 'truncated'
+          flag is set if the file was longer.
+        - full_read=True: for questions about a file the user has named
+          explicitly that require the whole file. The cap is lifted up to
+          the hard ceiling MAX_FULL_READ_CHARS; a larger file is refused
+          with chunking guidance rather than overflowing the context.
+        - offset/length: page through an oversized file in sequential
+          chunks. The response reports total_chars, has_more and
+          next_offset so the model can continue where it left off.
 
         In addition to real files under /config, four families of virtual
         files are accepted and resolved against the live registries:
@@ -253,13 +291,26 @@ class AgentTools:
 
         Args:
             file_path: Required. Relative path (e.g. 'automations.yaml').
+            full_read: Optional. Return the entire file in one pass, up to
+                       MAX_FULL_READ_CHARS. Use only when the user has
+                       named this file explicitly and the whole content is
+                       needed; otherwise leave False.
+            offset: Optional. Zero-based character offset to start reading
+                    from (enables chunked/paged reads of large files).
+            length: Optional. Maximum characters to return from offset.
+                    Defaults to DEFAULT_CHUNK_CHARS in paged mode.
 
         Returns:
             Dict with:
                 - success: bool
                 - path: str
-                - content: str (capped at MAX_CONTENT_CHARS)
-                - truncated: bool
+                - content: str (bounded as described above)
+                - truncated: bool (True if content does not cover the
+                             whole file)
+                - total_chars: int (full length of the file)
+                - offset: int (only in paged mode)
+                - has_more: bool (only in paged mode)
+                - next_offset: Optional[int] (only in paged mode)
                 - error: Optional[str]
         """
         try:
@@ -323,11 +374,87 @@ class AgentTools:
                         "error": f"File not found: {file_path}"
                     }
 
+            total_chars = len(content)
+
+            # --- Paged read (offset given) ------------------------------
+            # The model is walking through a large file in sequential
+            # chunks. Each response is bounded by DEFAULT_CHUNK_CHARS
+            # (or the requested length) and reports how to continue.
+            if offset is not None:
+                offset = max(0, int(offset))
+                chunk_len = int(length) if length else DEFAULT_CHUNK_CHARS
+                chunk_len = max(1, min(chunk_len, MAX_READ_CHARS))
+                chunk = content[offset:offset + chunk_len]
+                has_more = (offset + len(chunk)) < total_chars
+
+                logger.info(
+                    f"Agent reading file chunk: '{file_path}' "
+                    f"[{offset}:{offset + len(chunk)}] of {total_chars}"
+                )
+                return {
+                    "success": True,
+                    "path": file_path,
+                    "content": chunk,
+                    "offset": offset,
+                    "length": len(chunk),
+                    "total_chars": total_chars,
+                    "has_more": has_more,
+                    "next_offset": offset + len(chunk) if has_more else None,
+                    "truncated": has_more,
+                }
+
+            # --- One-pass full read (explicitly requested) ---------------
+            # Allowed only up to the hard ceiling; a larger file is
+            # refused with actionable chunking guidance so the model
+            # falls back to paged reads instead of overflowing the
+            # context window.
+            if full_read:
+                if total_chars <= MAX_FULL_READ_CHARS:
+                    logger.info(
+                        f"Agent full read: '{file_path}' "
+                        f"({total_chars} chars, one pass)"
+                    )
+                    return {
+                        "success": True,
+                        "path": file_path,
+                        "content": content,
+                        "total_chars": total_chars,
+                        "truncated": False,
+                        "full_read": True,
+                    }
+                logger.warning(
+                    f"Agent full read refused: '{file_path}' is "
+                    f"{total_chars} chars, above the one-pass ceiling "
+                    f"of {MAX_FULL_READ_CHARS}"
+                )
+                return {
+                    "success": False,
+                    "path": file_path,
+                    "total_chars": total_chars,
+                    "error": (
+                        f"File is {total_chars} characters, above the "
+                        f"{MAX_FULL_READ_CHARS}-character one-pass limit. "
+                        f"Read it in sequential chunks instead: call "
+                        f"read_config_file with offset=0, then keep calling "
+                        f"with the returned next_offset until has_more is "
+                        f"false. Each chunk is capped at "
+                        f"{DEFAULT_CHUNK_CHARS} characters."
+                    ),
+                }
+
+            # --- Default bounded read ------------------------------------
             return {
                 "success": True,
                 "path": file_path,
                 "content": content[:MAX_READ_CHARS],
-                "truncated": len(content) > MAX_READ_CHARS
+                "total_chars": total_chars,
+                "truncated": total_chars > MAX_READ_CHARS,
+                "note": (
+                    "Content truncated at the default cap. If the whole "
+                    "file is needed and the user named it explicitly, "
+                    "retry with full_read=true; for very large files, "
+                    "read in chunks with offset/length."
+                ) if total_chars > MAX_READ_CHARS else None,
             }
 
         except Exception as e:

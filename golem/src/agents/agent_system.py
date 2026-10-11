@@ -156,6 +156,7 @@ Important Guidelines:
 - secrets.yaml is excluded from searches; never claim to know its contents
 - When compiling documentation, ground every statement in files you have actually read
 - Ask clarifying questions if a request is ambiguous
+- Reading large files: if a read returns truncated=true and the user explicitly named that file, either re-read it with full_read=true, or read it in sequential chunks with offset/length (continue at next_offset until has_more is false). Do not answer questions that require the whole file until you have read all of it; if a full read is refused as too large, complete the task with chunked passes. State plainly if any part could not be read.
 
 Response Style:
 - Be concise but thorough
@@ -294,7 +295,13 @@ Remember: You are assisting with a production Home Assistant system. Accuracy an
                             "search_config_files whenever the file is already known. If the "
                             "user refers to curated documentation or notes files, ask them for "
                             "the exact path rather than guessing one. Content is capped; the "
-                            "'truncated' flag shows if the file was longer. 'lovelace.yaml' and "
+                            "'truncated' flag shows if the file was longer. If the user has "
+                            "EXPLICITLY named a file and the whole content is needed (e.g. "
+                            "'check every automation in automations.yaml'), set full_read=true "
+                            "to read it in one pass (refused with chunking guidance if the "
+                            "file exceeds the one-pass limit), or use offset/length to read "
+                            "large files in sequential chunks, continuing at next_offset "
+                            "until has_more is false. 'lovelace.yaml' and "
                             "registry entries (devices/<id>.json, entities/<id>.json, "
                             "areas/<id>.json) are also accepted."
                         ),
@@ -306,6 +313,32 @@ Remember: You are assisting with a production Home Assistant system. Accuracy an
                                     "description": (
                                         "Required. Relative path to the file (e.g. "
                                         "'configuration.yaml', 'automations.yaml')."
+                                    )
+                                },
+                                "full_read": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "Optional, default false. Return the entire file in "
+                                        "one pass. Use ONLY when the user explicitly named "
+                                        "this file and the whole content is required; the "
+                                        "request is refused with chunking guidance if the "
+                                        "file is too large for one pass. Never use this for "
+                                        "exploratory reading."
+                                    )
+                                },
+                                "offset": {
+                                    "type": "integer",
+                                    "description": (
+                                        "Optional. Zero-based character offset to start a "
+                                        "chunked read from. Start at 0 and continue at the "
+                                        "returned next_offset until has_more is false."
+                                    )
+                                },
+                                "length": {
+                                    "type": "integer",
+                                    "description": (
+                                        "Optional. Maximum characters to return in a "
+                                        "chunked read (offset given). Default 60000."
                                     )
                                 }
                             },
@@ -514,7 +547,13 @@ Remember: You are assisting with a production Home Assistant system. Accuracy an
                         result = await self.tools.search_config_files(**function_args)
                     elif function_name == "read_config_file":
                         result = await self.tools.read_config_file(**function_args)
-                        logger.info(f"[ITERATION {iteration}] Tool result: success={result.get('success')}, file_count={result.get('count')}")
+                        logger.info(
+                            f"[ITERATION {iteration}] Tool result: "
+                            f"success={result.get('success')}, "
+                            f"path={result.get('path')}, "
+                            f"total_chars={result.get('total_chars')}, "
+                            f"truncated={result.get('truncated')}"
+                        )
                     else:
                         result = {
                             "success": False,
